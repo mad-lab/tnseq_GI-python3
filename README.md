@@ -1,6 +1,7 @@
-## <a name="source">Source Code</a>
+# tnseq-GI
 
-Source code is written in Python, and comes with a [README](README.html) document containing instructions.
+Tool for analysis of genetic interactions (GI) from TnSeq data.
+
 
 #### <a name="version">Version History</a>
 
