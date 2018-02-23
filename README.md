@@ -4,7 +4,11 @@ Source code is written in Python, and comes with a [README](README.html) documen
 
 #### <a name="version">Version History</a>
 
-*   [Version 1.00:](tnseq_GI_1.00.tar.gz) Initial release of code.
+**Versionn 1.1.0 changes **
+    - Using empirical priors
+    - Added type classification in output;
+    - More options in arguments
+
 
 #### <a name="requirements">Requirements:</a>
 
@@ -320,4 +324,4 @@ The execution of the software on the representative dataset takes roughly 10 min
 Creative Commons License  
 [![Creative Commons License](http://i.creativecommons.org/l/by-nc/3.0/88x31.png)](http://creativecommons.org/licenses/by-nc/3.0/deed.en_US)  
 Attribution-NonCommercial 3.0 Unported  
-© Copyright 2012 - <script language="JavaScript" type="text/javascript">now = new Date document.write(now.getFullYear())</script> . Michael A. DeJesus & Thomas R. Ioerger.</center>
+© Copyright 2012. Michael A. DeJesus & Thomas R. Ioerger.</center>
