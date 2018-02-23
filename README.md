@@ -17,10 +17,6 @@ Tool for analysis of genetic interactions (GI) from TnSeq data.
 *   Scipy 0.6.0+ [www.scipy.org/Download](http://www.scipy.org/Download)
 *   Numpy 1.2.1+ [www.scipy.org/Download](http://www.scipy.org/Download)
 
-Source code can be extracted by using the following command:
-
-<pre>tar -xvzf tnseq_GI_1.00.tar.gz
-</pre>
 
 ## <a name="source">Data</a>
 
@@ -42,7 +38,7 @@ Example files are provided below to test the execution of the script and help ve
 
 ## <a name="instructions">Instructions</a>
 
-Before running the python script, please make sure you have installed all the necessary [prerequisites](#requirements) listed above, and have downloaded the [latest version](http://saclab.tamu.edu/essentiality/GI/#version) of the script. Once the prerequisite software and libraries are installed, to run the script simply type the following command:
+Before running the python script, please make sure you have installed all the necessary [prerequisites](#requirements) listed above, and have downloaded the latest version of the script. Once the prerequisite software and libraries are installed, to run the script simply type the following command:
 
 <pre>python tnseq_GI.py -wt1 H37Rv_d0_r1.wig,H37Rv_d0_r2.wig -wt2 H37Rv_d32_r1.wig,H37Rv_d32_r2.wig -ko1 Rv260_KO_d0_r1.wig,Rv260_KO_d0_r2.wig -ko2 Rv2680_KO_d32_r1.wig,Rv2680_KO_d32_r2.wig -pt H37Rv.prot_table
 </pre>
