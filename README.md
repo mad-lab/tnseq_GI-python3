@@ -4,10 +4,10 @@ Source code is written in Python, and comes with a [README](README.html) documen
 
 #### <a name="version">Version History</a>
 
-**Versionn 1.1.0 changes **
-    - Using empirical priors
-    - Added type classification in output;
-    - More options in arguments
+**Versionn 1.1.0 changes**
+ - Using empirical priors
+ - Added type classification in output;
+ - More options in arguments
 
 
 #### <a name="requirements">Requirements:</a>
