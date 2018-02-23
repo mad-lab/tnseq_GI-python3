@@ -1,15 +1,15 @@
 import sys
 import traceback
-import operator
 import numpy
 import scipy.stats
+
+# Import pytransit modules
 import pytransit.transit_tools as transit_tools
-import pytransit.norm_tools as norm_tools
-import pytransit.stat_tools as stat_tools
 import pytransit.tnseq_tools as tnseq_tools
+import pytransit.norm_tools as norm_tools
 
 
-__version__ = 1.00
+__version__ = 1.1
 
 def HDI_from_MCMC(posterior_samples, credible_mass=0.95):
     # Credit to 'user72564'
@@ -30,240 +30,385 @@ def HDI_from_MCMC(posterior_samples, credible_mass=0.95):
 
 def sample_post(data, S, mu0, s20, k0, nu0):
     n = len(data)
-    s2 = numpy.var(data,ddof=0)
-    if numpy.isnan(s2):
-        s2 = 0.0
+    s2 = numpy.var(data,ddof=1)
     ybar = numpy.mean(data)
-
     kn = k0+n
     nun = nu0+n
     mun = (k0*mu0 + n*ybar)/float(kn)
     s2n = (1.0/nun) * (nu0*s20 + (n-1)*s2 + (k0*n/float(kn))*numpy.power(ybar-mu0,2))
 
     s2_post = 1.0/scipy.stats.gamma.rvs(nun/2.0, scale=2.0/(s2n*nun), size=S)
-    mu_post = scipy.stats.norm.rvs(mun, numpy.sqrt(s2_post/float(kn)), size=S)
+
+    # Truncated Normal since counts can't be negative
+    min_mu = 0
+    max_mu = 1000000
+    trunc_a = (min_mu-mun)/numpy.sqrt(s2_post/float(kn))
+    trunc_b = (max_mu-mun)/numpy.sqrt(s2_post/float(kn))
+
+    mu_post = scipy.stats.truncnorm.rvs(a=trunc_a, b=trunc_b, loc=mun, scale=numpy.sqrt(s2_post/float(kn)), size=S)
 
     return (mu_post, s2_post)
 
 
-def usage():
-    return """python %s -wt1 <comma-separated wig files> -wt2 <comma-separated wig files> -ko1 <comma-separated wig files> -ko2 <comma-separated wig files> -pt <path to annotation> [-rope <+/- rope window>, -s <samples> --debug]""" % (sys.argv[0])
+
+def FWER_Bayes(X):
+    ii = numpy.argsort(numpy.argsort(X))
+    P_NULL = numpy.sort(X)
+    W = 1 - P_NULL
+    N = len(P_NULL)
+    P_ALT = numpy.zeros(N)
+    for i in range(N):
+        P_ALT[i] = 1.0 - numpy.prod(W[:i+1])
+    return P_ALT[ii]
 
 
-(args, kwargs) = transit_tools.cleanargs(sys.argv)
+def bFDR(X):
+    N = len(X)
+    ii = numpy.argsort(numpy.argsort(X))
+    P_NULL = numpy.sort(X)
+    P_ALT = numpy.zeros(N)
+    for i in range(N):
+        P_ALT[i] = numpy.mean(P_NULL[:i+1])
+    return P_ALT[ii]
 
 
-missingArgs = False
-if "wt1" not in kwargs:
-    missingArgs = True
-    print "Error: Missing -wt1 argument."
-if "wt2" not in kwargs:
-    missingArgs = True
-    print "Error: Missing -wt2 argument."
-if "ko1" not in kwargs:
-    missingArgs = True
-    print "Error: Missing -ko1 argument."
-if "ko2" not in kwargs:
-    missingArgs = True
-    print "Error: Missing -ko2 argument."
-if "pt" not in kwargs:
-    missingArgs = True
-    print "Error: Missing -pt argument."
-
-
-if missingArgs:
-    print usage()
-    sys.exit()
-
-
-
-wt_0list = kwargs["wt1"].split(",")
-wt_32list = kwargs["wt2"].split(",")
-ko_0list = kwargs["ko1"].split(",")
-ko_32list = kwargs["ko2"].split(",")
-wiglist = wt_0list + ko_0list + wt_32list + ko_32list
-
-Nwig = len(wiglist)
-Nwt0 = len(wt_0list)
-Nko0 = len(ko_0list)
-Nwt32 = len(wt_32list)
-Nko32 = len(ko_32list)
-
-rope = float(kwargs.get("rope", 0.5))
-S = int(kwargs.get("s", 20000))
-DEBUG = []
-if "-debug" in kwargs:
-    DEBUG = kwargs["-debug"].split(",") 
-
-
-annotation =  kwargs["pt"]
-
-hash = transit_tools.get_pos_hash(annotation)
-orf2info = transit_tools.get_gene_info(annotation)
-
-GENES = tnseq_tools.Genes(wiglist, annotation, norm="TTR")
-
-
-# PRIORS
-mu0=numpy.mean(GENES.data)
-s20=1.0
-k0=1.0
-nu0=2.0
-HDI_alpha = 0.05
-
-
-data = []
-postprob = []
-print "# Copyright 2016. Michael A. DeJesus & Thomas R. Ioerger"
-print "# Version %1.2f; http://saclab.tamu.edu/essentiality/GI" % __version__
-print "#"
-print "# python %s" % " ".join(sys.argv)
-print "# mu0=%1.2f, S=%d, s20=%1.1f, k0=%1.1f, nu0=%1.1f" % (mu0, S, s20, k0, nu0)
-print "# ROPE:", rope
-for gene in GENES:
-
-
-    if DEBUG and gene.orf not in DEBUG: continue
-
-    all_data = gene.reads 
-
-    if all_data.size > 0:
-
-        try:
-            wt0_data = all_data[0:Nwt0,:].flatten()
-            ko0_data = all_data[Nwt0:(Nwt0+Nko0),:].flatten()
-            wt32_data = all_data[(Nwt0+Nko0):(Nwt0+Nko0+Nwt32),:].flatten()
-            ko32_data = all_data[(Nwt0+Nko0+Nwt32):,:].flatten()
-
-            #       0    32
-            #
-            #  wt   A    C
-            #
-            #  ko   B    D
-
-            muA_post, varA_post = sample_post(wt0_data, S, mu0, s20, k0, nu0)
-            muB_post, varB_post = sample_post(ko0_data, S, mu0, s20, k0, nu0)
-            muC_post, varC_post = sample_post(wt32_data, S, mu0, s20, k0, nu0)
-            muD_post, varD_post = sample_post(ko32_data, S, mu0, s20, k0, nu0)
-
-            varAC_post = varA_post + varC_post
-            varBD_post = varB_post + varD_post
-            varBDAC_post = varAC_post + varBD_post
-
-            muA_post[muA_post<=0] = 0.001
-            muB_post[muB_post<=0] = 0.001
-            muC_post[muC_post<=0] = 0.001
-            muD_post[muD_post<=0] = 0.001
-
-            muAC_post = numpy.log2(muC_post/muA_post)
-            muBD_post = numpy.log2(muD_post/muB_post)
-            muBDAC_post = muBD_post - muAC_post
-
-    
-            l_AC, u_AC = HDI_from_MCMC(muAC_post, 1.0-HDI_alpha)
-
-            l_BD, u_BD = HDI_from_MCMC(muBD_post, 1.0-HDI_alpha)
-
-            l_BDAC, u_BDAC = HDI_from_MCMC(muBDAC_post, 1.0-HDI_alpha)
-        
-
-            mu_AC = numpy.mean(muAC_post)
-            mu_BD = numpy.mean(muBD_post)
-            mu_BDAC = numpy.mean(muBDAC_post)
-        
-
-            postprobBDAC = min(numpy.mean(muBDAC_post<=0), numpy.mean(muBDAC_post>=0))
-            probROPE = numpy.mean(numpy.logical_and(muBDAC_post>=0.0-rope,  muBDAC_post<=0.0+rope))
-
-
-        except Exception as e:
-
-            print "Encountered the following Exception:"
-            traceback.print_exc()
-            print "Quitting."
-            sys.exit()
-
+def classify_interaction(delta_logFC, logFC_KO, logFC_WT):
+    if delta_logFC < 0:
+        return "Aggravating"
+    elif delta_logFC >= 0 and abs(logFC_KO) < abs(logFC_WT):
+        return "Alleviating"
+    elif delta_logFC >= 0 and abs(logFC_KO) > abs(logFC_WT):
+        return "Suppressive"
     else:
-        wt0_data = [0]
-        ko0_data = [0]
-        wt32_data = [0]
-        ko32_data = [0]
+        return "N/A"
 
-        mu_AC = 0
-        mu_BD = 0
-        mu_BDAC = 0
-        l_AC = 0
-        u_AC = 0
-        l_BD = 0
-        u_BD = 0
-        l_BDAC = 0 
-        u_BDAC = 0
-        postprobBDAC = 1.0
-        probROPE = 1.0
+
+def error(x):
+    print "Error: %s" % x
+
+def usage():
+    print """python %s -pt <Annotation .prot_table or .gff3>  -a1 <Comma seperated Strain A Time 1 .wig files> -b1 <Comma seperated Strain B Time 1 .wig files> -a2 <Comma seperated Strain A Time 2 .wig files> -b2 <Comma seperated Strain B Time 2 .wig files> [options]
+
+        Optional Arguments:
+        -rope <float>   :=  -/+ Margin for Region of Potential Equivalency (ROPE) around a logFC of zero (i.e. defines null region of no change).
+                            Default: -rope  0.5
+        -s <integer>    :=  Number of samples to take for Monte Carlo estimates. Default: -s 100000
+        -n <string>     :=  Normalization method. Default: -n TTR
+        --nz            :=  Ignore sites that are empty (missing) in all datasets. Default: False.
+        --bfdr          :=  Analyze hits using overlap of delta-logFC with ROPE and adjusted using BFDR method. Default: Binary HDI decision.
+        --fwer          :=  Analyze hits using overlap of delta-logFC with ROPE and adjusted using a custom FWER method. 
+                            More conservative than --bfdr. Default: Binary HDI decision.
+        -debug <string> :=  Saves Monter Carlo samples of given comma seperated genes (IDs) to disk.
+                            Example: -debug Rv0001,Rv3910c
+        -l <string>     :=  Label to use when saving files in debug mode.
+""" % sys.argv[0]
+
+
+def main(args, kwargs, quite=False, jumble=False):
+
+
+
+    missingArgs = False
+    if "a1" not in kwargs:
+        missingArgs = True
+        error("Missing -a1 argument")
+    if "a2" not in kwargs:
+        missingArgs = True
+        error("Missing -a2 argument")
+    if "b1" not in kwargs:
+        missingArgs = True
+        error("Missing -b1 argument")
+    if "b2" not in kwargs:
+        missingArgs = True
+        error("Missing -b2 argument")
+    if "pt" not in kwargs:
+        missingArgs = True
+        error("Missing -pt argument")
+
+    if missingArgs:
+        usage()
+        sys.exit()
+
+    A_1list = kwargs["a1"].split(",")
+    A_2list = kwargs["a2"].split(",")
+    B_1list = kwargs["b1"].split(",")
+    B_2list = kwargs["b2"].split(",")
+
+    annotation = kwargs["pt"]
+    rope = float(kwargs.get("rope", 0.5))
+    S = int(kwargs.get("s", 100000))
+    norm_method = kwargs.get("n", "TTR")
+    label = kwargs.get("l", "debug")
+    onlyNZ = kwargs.get("-nz", False)
+    doBFDR = kwargs.get("-bfdr", False)
+    doFWER = kwargs.get("-fwer", False)
+    DEBUG = []
+    if "debug" in kwargs:
+        DEBUG= kwargs["debug"].split(",")
+
+    wiglist = A_1list + B_1list + A_2list + B_2list
+
+    Nwig = len(wiglist)
+    Na1 = len(A_1list)
+    Nb1 = len(A_1list)
+    Na2 = len(B_2list)
+    Nb2 = len(B_2list)
         
+        
+    (data, position) = tnseq_tools.get_data(wiglist)
 
-    if numpy.isnan(l_AC):
-        l_AC = -10
-        u_AC = 10
-    if numpy.isnan(l_BD):
-        l_BD = -10
-        u_BD = 10
-    if numpy.isnan(l_BDAC):
-        l_BDAC = -10
-        u_BDAC = 10
-
-
-    bit_AC = not (l_AC <= 1.0 <= u_AC)
-    bit_BD = not (l_BD <= 1.0 <= u_BD)
-    bit_BDAC = not (l_BDAC <= 0.0 <= u_BDAC)
-    bit_BDAC_ROPE = (u_BDAC < 0.0-rope) or (0.0+rope < l_BDAC)
-
-    n = len(all_data)
-
-    if DEBUG:
-
-        out = open("dump.%s_muA_normlog_post" % gene.orf, "w")
-        for x in muA_post:
-            print >> out, x
-
-        out = open("dump.%s_muC_normlog_post" % gene.orf, "w")
-        for x in muC_post:
-            print >> out, x
-
-        out = open("dump.%s_muAC_normlog_post" % gene.orf, "w")
-        for x in muAC_post:
-            print >> out, x        
-
-
-        out = open("dump.%s_muB_normlog_post" % gene.orf, "w")
-        for x in muB_post:
-            print >> out, x
-
-        out = open("dump.%s_muD_normlog_post" % gene.orf, "w")
-        for x in muD_post:
-            print >> out, x
-
-        out = open("dump.%s_muBD_normlog_post" % gene.orf, "w")
-        for x in muBD_post:
-            print >> out, x
-
-
-        out = open("dump.%s_muBDAC_normlog_post" % gene.orf, "w")
-        for x in muBDAC_post:
-            print >> out, x
-
-
-
-    data.append((gene.orf, gene.name, gene.desc, gene.n, numpy.mean(wt0_data), numpy.mean(wt32_data), numpy.mean(ko0_data), numpy.mean(ko32_data), mu_AC, mu_BD, mu_BDAC, l_BDAC, u_BDAC, bit_BDAC_ROPE == 1))
+    ######### FILTER EMTPY SITES #########
+    if onlyNZ:
+        ii_good = numpy.sum(data,0) > 0
+        data = data[:,ii_good]
+        position = position[ii_good]
+    ######################################
     
+    (data, factors) = norm_tools.normalize_data(data, norm_method, wiglist, sys.argv[1])
+    
+   
+    if jumble:
+        numpy.random.shuffle(data.flat)
+        numpy.random.shuffle(data.flat)
+ 
+    
+    G_A1 = tnseq_tools.Genes([], annotation, data=data[:Na1], position=position)
+    G_B1 = tnseq_tools.Genes([], annotation, data=data[Na1:(Na1+Nb1)], position=position)
+    G_A2 = tnseq_tools.Genes([], annotation, data=data[(Na1+Nb1):(Na1+Nb1+Na2)], position=position)
+    G_B2 = tnseq_tools.Genes([], annotation, data=data[(Na1+Nb1+Na2):], position=position)
+    
+    
+    means_list_a1 = []
+    means_list_b1 = []
+    means_list_a2 = []
+    means_list_b2 = []
 
-data.sort(key = operator.itemgetter(-1, -4), reverse=True)
-print "#ORF\tName\tDescription\tN\tMean WT-1\tMean WT-2\tMean KO-1\tMean KO-2\tMean logFC WT-2/WT-1\tMean log FC KO-2/KO-1\tMean delta logFC\tL. Bound\tU. Bound\tOutside of HDI?"
-for row in data:
-    print "%s\t%s\t%s\t%d\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%s" % row
+    var_list_a1 = []
+    var_list_a2 = []
+    var_list_b1 = []
+    var_list_b2 = []
+   
+    # Base priors on empirical observations accross genes. 
+    for gene in sorted(G_A1):
+        if gene.n > 1:
+            A1_data = G_A1[gene.orf].reads.flatten()
+            B1_data = G_B1[gene.orf].reads.flatten()
+            A2_data = G_A2[gene.orf].reads.flatten()
+            B2_data = G_B2[gene.orf].reads.flatten()
+    
+            means_list_a1.append(numpy.mean(A1_data))
+            var_list_a1.append(numpy.var(A1_data))
+    
+            means_list_b1.append(numpy.mean(B1_data))
+            var_list_b1.append(numpy.var(B1_data))
+            
+            means_list_a2.append(numpy.mean(A2_data))
+            var_list_a2.append(numpy.var(A2_data))
+            
+            means_list_b2.append(numpy.mean(B2_data))
+            var_list_b2.append(numpy.var(B2_data))
+
+    # Priors
+    mu0_A1 = scipy.stats.trim_mean(means_list_a1, 0.01)
+    mu0_B1 = scipy.stats.trim_mean(means_list_b1, 0.01) 
+    mu0_A2 = scipy.stats.trim_mean(means_list_a2, 0.01) 
+    mu0_B2 = scipy.stats.trim_mean(means_list_b2, 0.01) 
+    
+    s20_A1 = scipy.stats.trim_mean(var_list_a1, 0.01)
+    s20_B1 = scipy.stats.trim_mean(var_list_b1, 0.01)
+    s20_A2 = scipy.stats.trim_mean(var_list_a2, 0.01)
+    s20_B2 = scipy.stats.trim_mean(var_list_b2, 0.01)
+    
+    k0=1.0
+    nu0=1.0
+    
+    data = []
+    postprob = []
+    
+    if not quite:
+        print "# Created with '%s'.  Copyright 2016-2017. Michael A. DeJesus & Thomas R. Ioerger" % (sys.argv[0])
+        print "# Version %1.2f; http://saclab.tamu.edu/essentiality/GI" % __version__
+        print "#"
+        print "# python %s" % " ".join(sys.argv)
+        print "# Samples = %d, k0=%1.1f, nu0=%1.1f" % (S, k0, nu0)
+        print "# Mean Prior:       Variance Prior:"
+        print "# mu0_A1 = %1.2f    s20_A1 = %1.1f" % (mu0_A1, s20_A1)
+        print "# mu0_B1 = %1.2f    s20_B1 = %1.1f" % (mu0_B1, s20_B1)
+        print "# mu0_A2 = %1.2f    s20_A2 = %1.1f" % (mu0_A2, s20_A2)
+        print "# mu0_B2 = %1.2f    s20_B2 = %1.1f" % (mu0_B2, s20_B2)
+        print "# ROPE:", rope
+        print "# TTR Factors:", ", ".join(["%1.4f" % x for x in numpy.array(factors).flatten()])
+    for gene in sorted(G_A1):
+    
+    
+        if len(DEBUG) > 0:
+            if gene.orf not in DEBUG: continue
+    
+        if gene.n > 0:
+            A1_data = G_A1[gene.orf].reads.flatten()
+            B1_data = G_B1[gene.orf].reads.flatten()
+            A2_data = G_A2[gene.orf].reads.flatten()
+            B2_data = G_B2[gene.orf].reads.flatten()
 
 
+        #            Time-1   Time-2
+        #
+        #  Strain-A     A       C
+        #
+        #  Strain-B     B       D
 
-                
+            try:
+                muA1_post, varA1_post = sample_post(A1_data, S, mu0_A1, s20_A1, k0, nu0)
+                muB1_post, varB1_post = sample_post(B1_data, S, mu0_B1, s20_B1, k0, nu0)
+                muA2_post, varA2_post = sample_post(A2_data, S, mu0_A2, s20_A2, k0, nu0)
+                muB2_post, varB2_post = sample_post(B2_data, S, mu0_B2, s20_B2, k0, nu0)
+            except Exception as e:
+                muA1_post = varA1_post = numpy.ones(S)
+                muB1_post = varB1_post = numpy.ones(S)
+                muA2_post = varA2_post = numpy.ones(S)
+                muB2_post = varB2_post = numpy.ones(S)
+    
+            logFC_A_post = numpy.log2(muA2_post/muA1_post)
+            logFC_B_post = numpy.log2(muB2_post/muB1_post)
+            delta_logFC_post = logFC_B_post - logFC_A_post
+    
+            alpha = 0.05
+   
+            # Get Bounds of the HDI 
+            l_logFC_A, u_logFC_A = HDI_from_MCMC(logFC_A_post, 1-alpha)
+    
+            l_logFC_B, u_logFC_B = HDI_from_MCMC(logFC_B_post, 1-alpha)
+    
+            l_delta_logFC, u_delta_logFC = HDI_from_MCMC(delta_logFC_post, 1-alpha)
+    
+            mean_logFC_A = numpy.mean(logFC_A_post)
+            mean_logFC_B = numpy.mean(logFC_B_post)
+            mean_delta_logFC = numpy.mean(delta_logFC_post)
+      
+            # Is HDI significantly different than ROPE? 
+            not_HDI_overlap_bit = l_delta_logFC > rope or u_delta_logFC < -rope
+
+            # Probability of posterior overlaping with ROPE
+            probROPE = numpy.mean(numpy.logical_and(delta_logFC_post>=0.0-rope,  delta_logFC_post<=0.0+rope))
+    
+    
+        else:
+            A1_data = [0,0]
+            B1_data = [0,0]
+            A2_data = [0,0]
+            B2_data = [0,0]
+    
+            mean_logFC_A = 0
+            mean_logFC_B = 0
+            mean_delta_logFC = 0
+            l_logFC_A = 0
+            u_logFC_A = 0
+            l_logFC_B = 0
+            u_logFC_B = 0
+            l_delta_logFC = 0 
+            u_delta_logFC = 0
+            probROPE = 1.0
+        
+    
+        if numpy.isnan(l_logFC_A):
+            l_logFC_A = -10
+            u_logFC_A = 10
+        if numpy.isnan(l_logFC_B):
+            l_logFC_B = -10
+            u_logFC_B = 10
+        if numpy.isnan(l_delta_logFC):
+            l_delta_logFC = -10
+            u_delta_logFC = 10
+    
+    
+        if DEBUG:
+    
+            out = open("%s.%s_muA1_post" % (label, gene.orf), "w")
+            for x in muA1_post:
+                print >> out, x
+    
+            out = open("%s.%s_muA2_post" % (label, gene.orf), "w")
+            for x in muA2_post:
+                print >> out, x
+    
+            out = open("%s.%s_logFC_A_post" % (label, gene.orf), "w")
+            for x in logFC_A_post:
+                print >> out, x        
+    
+    
+            out = open("%s.%s_muB1_post" % (label, gene.orf), "w")
+            for x in muB1_post:
+                print >> out, x
+    
+            out = open("%s.%s_muB2_post" % (label, gene.orf), "w")
+            for x in muB2_post:
+                print >> out, x
+    
+            out = open("%s.%s_logFC_B_post" % (label, gene.orf), "w")
+            for x in logFC_A_post:
+                print >> out, x
+    
+    
+            out = open("%s.%s_delta_logFC_post" % (label, gene.orf), "w")
+            for x in delta_logFC_post:
+                print >> out, x
+
+        postprob.append(probROPE)
+        data.append((gene.orf, gene.name, gene.n, numpy.mean(muA1_post), numpy.mean(muA2_post), numpy.mean(muB1_post), numpy.mean(muB2_post), mean_logFC_A, mean_logFC_B, mean_delta_logFC, l_delta_logFC, u_delta_logFC, probROPE, not_HDI_overlap_bit))
+    
+    if doBFDR or not doFWER:
+        postprob = numpy.array(postprob)
+        postprob.sort()
+        bfdr = numpy.cumsum(postprob)/numpy.arange(1, len(postprob)+1)
+        adjusted_prob = bfdr
+        adjusted_label = "BFDR"
+        if doBFDR:
+            data.sort(key=lambda x: x[-2])
+        else: 
+            data.sort(key=lambda x: x[-1], reverse=True) 
+    elif doFWER:
+        fwer = FWER_Bayes(postprob)
+        fwer.sort()
+        adjusted_prob = fwer
+        adjusted_label = "FWER"
+        data.sort(key=lambda x: x[-2])
+    
+    return (data, adjusted_prob, adjusted_label)
+
+
+def print_results(args, kwargs, data, adjusted_prob, adjusted_label):    
+
+    doBFDR = kwargs.get("-bfdr", False)
+    doFWER = kwargs.get("-fwer", False)
+
+    # Write notice of classification criteria
+    print "#"
+    if doBFDR or doFWER:
+        print "# Significant interactions are those whose adjusted probability of the delta-logFC falling within ROPE is < 0.05 (Adjusted using %s)" % adjusted_label
+    else:
+        print "# Significant interactions are those genes whose delta-logFC HDI does not overlap the ROPE"
+    print "#"
+
+    # Write column names
+    sys.stdout.write("#ORF\tName\tNumber of TA Sites\tMean count (Strain A Time 1)\tMean count (Strain A Time 2)\tMean count (Strain B Time 1)\tMean count (Strain B Time 2)\tMean logFC (Strain A)\tMean logFC (Strain B) \tMean delta logFC\tLower Bound delta logFC\tUpper Bound delta logFC\tProb. of delta-logFC being within ROPE\tAdjusted Probability (%s)\tIs HDI outside ROPE?\tType of Interaction\n" % adjusted_label)
+
+    # Write gene results
+    for i,row in enumerate(data):
+        #1   2    3        4                5              6               7                8            9            10              11             12            13         14   
+        orf, name, n, mean_muA1_post, mean_muA2_post, mean_muB1_post, mean_muB2_post, mean_logFC_A, mean_logFC_B, mean_delta_logFC, l_delta_logFC, u_delta_logFC, probROPE, not_HDI_overlap_bit = row
+        type_of_interaction = "No Interaction"
+        if ((doBFDR or doFWER) and adjusted_prob[i] < 0.05):
+            type_of_interaction = classify_interaction(mean_delta_logFC, mean_logFC_B, mean_logFC_A)
+        elif not (doBFDR or doFWER) and not_HDI_overlap_bit:
+            type_of_interaction = classify_interaction(mean_delta_logFC, mean_logFC_B, mean_logFC_A)
+
+        new_row = tuple(list(row[:-1])+[adjusted_prob[i], not_HDI_overlap_bit, type_of_interaction])
+        sys.stdout.write("%s\t%s\t%d\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.8f\t%1.8f\t%s\t%s\n" % new_row)
+
+if __name__ == "__main__":
+
+    (args, kwargs) = transit_tools.cleanargs(sys.argv[1:])
+    (data, adjusted_prob, adjusted_label) = main(args, kwargs)
+    print_results(args, kwargs, data, adjusted_prob, adjusted_label)
 
 

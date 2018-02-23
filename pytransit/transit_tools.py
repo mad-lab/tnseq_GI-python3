@@ -69,6 +69,10 @@ def basename(filepath):
     return ntpath.basename(filepath)
 
 
+def dirname(filepath):
+    return os.path.dirname(os.path.abspath(filepath))
+
+
 def cleanargs(rawargs):
     #TODO: Write docstring
     args = []
@@ -76,15 +80,14 @@ def cleanargs(rawargs):
     count = 0
     while count < len(rawargs):
         if rawargs[count].startswith("-"):
-            try:
+            if count + 1 < len(rawargs) and not rawargs[count+1].startswith("-"):
                 kwargs[rawargs[count][1:]] = rawargs[count+1]
                 count += 1
-            except IndexError as IE:
+            else:
                 kwargs[rawargs[count][1:]] = True
         else:
             args.append(rawargs[count])
         count += 1
-
     return (args, kwargs)
 
 
@@ -120,10 +123,12 @@ def ShowError(MSG=""):
         wx.OK | wx.ICON_ERROR)
     dial.ShowModal()
 
-def transit_message(msg=""):
+def transit_message(msg="", prefix=""):
     #TODO: Write docstring
-    print pytransit.prefix, msg
-
+    if prefix:
+        print prefix, msg
+    else:
+        print pytransit.prefix, msg
 
 def transit_error(text):
     #TODO: Write docstring
@@ -194,6 +199,23 @@ def get_pos_hash(path):
     else:
         return tnseq_tools.get_pos_hash_pt(path)
        
+
+def get_extended_pos_hash(path):
+    """Returns a dictionary that maps coordinates to a list of genes that occur at that coordinate.
+
+    Arguments:
+        path (str): Path to annotation in .prot_table or GFF3 format.
+
+    Returns:
+        dict: Dictionary of position to list of genes that share that position.
+    """
+    filename, file_extension = os.path.splitext(path)
+    if file_extension.lower() in [".gff", ".gff3"]:
+        return tnseq_tools.get_extended_pos_hash_gff(path)
+    else:
+        return tnseq_tools.get_extended_pos_hash_pt(path)
+
+
 
 def get_gene_info(path):
     """Returns a dictionary that maps gene id to gene information.
