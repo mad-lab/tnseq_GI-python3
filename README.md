@@ -317,6 +317,7 @@ Header/Comments are proceded with "#" tags, and are followed by a row for each O
 
 The execution of the software on the representative dataset takes roughly 10 minutes on running on a linux server using the default values. In general, this will depend on the number of genes in the genome being analyzed, the number of samples desired, and the number of replicate datasets. The number of samples to be taken can be controlled using the flag "-s".
 
+#### License
 <center>  
 GNU General Public License v3.0
 © Copyright 2012. Michael A. DeJesus & Thomas R. Ioerger.</center>
