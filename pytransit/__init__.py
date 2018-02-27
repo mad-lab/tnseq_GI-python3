@@ -1,11 +1,14 @@
+__all__ = ["transit", "tnseq", "norm", "stat"]
 
-__all__ = ["transit_tools", "tnseq_tools", "norm_tools", "stat_tools"]
+# https://stackoverflow.com/questions/8030264/relative-import-problems-in-python-3
 
+from . import norm_tools as norm
+from . import stat_tools as stat
 
-import transit_tools
-import tnseq_tools
-import norm_tools
-import stat_tools
+# These two jackholes have circular dependencies and are making me crazy.
+from . import tnseq_tools as tnseq
+from . import transit_tools as transit
+
 
 __version__ = "v2.0.2"
 prefix = "[TRANSIT]"
