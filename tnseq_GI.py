@@ -307,12 +307,13 @@ def main(args, kwargs, quite=False, jumble=False):
             mean_logFC_A = 0
             mean_logFC_B = 0
             mean_delta_logFC = 0
-            l_logFC_A = 0
-            u_logFC_A = 0
-            l_logFC_B = 0
-            u_logFC_B = 0
-            l_delta_logFC = 0
-            u_delta_logFC = 0
+            muA1_post = numpy.ones(S); muA2_post = numpy.ones(S);
+            muB1_post = numpy.ones(S); muB2_post = numpy.ones(S);
+            logFC_A_post = numpy.ones(S); logFC_B_post = numpy.ones(S);
+            delta_logFC_post = logFC_B_post - logFC_A_post;
+            l_logFC_A = 0; u_logFC_A = 0;
+            l_logFC_B = 0; u_logFC_B = 0;
+            l_delta_logFC = 0; u_delta_logFC = 0;
             probROPE = 1.0
             not_HDI_overlap_bit = False
 
